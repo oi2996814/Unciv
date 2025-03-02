@@ -2,19 +2,22 @@ package com.unciv.models.ruleset.tile
 
 import com.badlogic.gdx.graphics.Color
 import com.unciv.Constants
+import com.unciv.logic.MultiFilter
 import com.unciv.models.ruleset.Belief
 import com.unciv.models.ruleset.Ruleset
 import com.unciv.models.ruleset.RulesetStatsObject
-import com.unciv.models.ruleset.unique.UniqueFlag
+import com.unciv.models.ruleset.unique.StateForConditionals
 import com.unciv.models.ruleset.unique.UniqueTarget
 import com.unciv.models.ruleset.unique.UniqueType
-import com.unciv.ui.civilopedia.FormattedLine
-import com.unciv.ui.utils.extensions.colorFromRGB
+import com.unciv.ui.components.extensions.colorFromRGB
+import com.unciv.ui.objectdescriptions.uniquesToCivilopediaTextLines
+import com.unciv.ui.screens.civilopediascreen.FormattedLine
 
 class Terrain : RulesetStatsObject() {
 
     lateinit var type: TerrainType
 
+    /** For terrain features - indicates the stats of this terrain override those of all previous layers */
     var overrideStats = false
 
     /** If true, nothing can be built here - not even resource improvements */
@@ -23,7 +26,9 @@ class Terrain : RulesetStatsObject() {
     /** For terrain features */
     val occursOn = ArrayList<String>()
 
-    /** Used by Natural Wonders: it is the baseTerrain on top of which the Natural Wonder is placed */
+    /** Used by Natural Wonders: it is the baseTerrain on top of which the Natural Wonder is placed
+     *  Omitting it means the Natural Wonder is placed on whatever baseTerrain the Tile already had (limited by occursOn)
+     */
     var turnsInto: String? = null
 
     override fun getUniqueTarget() = UniqueTarget.Terrain
@@ -35,7 +40,7 @@ class Terrain : RulesetStatsObject() {
     @Suppress("PropertyName")   // RGB is expected to be in caps
     var RGB: List<Int>? = null
     var movementCost = 1
-    var defenceBonus:Float = 0f
+    var defenceBonus: Float = 0f
     var impassable = false
 
     @Transient
@@ -69,14 +74,16 @@ class Terrain : RulesetStatsObject() {
 
         val textList = ArrayList<FormattedLine>()
 
-        if (turnsInto != null) {
+        if (type == TerrainType.NaturalWonder) {
             textList += FormattedLine("Natural Wonder", header=3, color="#3A0")
         }
 
         val stats = cloneStats()
-        if (!stats.isEmpty()) {
+        if (!stats.isEmpty() || overrideStats) {
             textList += FormattedLine()
-            textList += FormattedLine("$stats")
+            textList += FormattedLine(if (stats.isEmpty()) "No yields" else "$stats")
+            if (overrideStats)
+                textList += FormattedLine("Overrides yields from underlying terrain")
         }
 
         if (occursOn.isNotEmpty() && !hasUnique(UniqueType.NoNaturalGeneration)) {
@@ -90,6 +97,15 @@ class Terrain : RulesetStatsObject() {
                 occursOn.forEach {
                     textList += FormattedLine(it, link="Terrain/$it", indent=1)
                 }
+            }
+        }
+
+        val improvementsThatCanBePlacedHere = ruleset.tileImprovements.values
+            .filter { it.terrainsCanBeBuiltOn.contains(name) }
+        if (improvementsThatCanBePlacedHere.isNotEmpty()){
+            textList += FormattedLine("{Tile Improvements}:")
+            for (improvement in improvementsThatCanBePlacedHere){
+                textList += FormattedLine(improvement.name, improvement.makeLink(), indent=1)
             }
         }
 
@@ -116,14 +132,11 @@ class Terrain : RulesetStatsObject() {
         // For now, natural wonders show no "open terrain" - may change later
         if (turnsInto == null && displayAs(TerrainType.Land, ruleset) && !isRough())
             textList += FormattedLine("Open terrain")   // Rough is in uniques
-        uniqueObjects.forEach {
-            if (!it.hasFlag(UniqueFlag.HiddenToUsers))
-                textList += FormattedLine(it)
-        }
+        uniquesToCivilopediaTextLines(textList, leadingSeparator = null)
 
         textList += FormattedLine()
-        textList += if (impassable) FormattedLine(Constants.impassable, color="#A00")
-                    else FormattedLine("{Movement cost}: $movementCost")
+        if (impassable) textList += FormattedLine(Constants.impassable, color="#A00")
+        else if (movementCost > 0) textList += FormattedLine("{Movement cost}: $movementCost")
 
         if (defenceBonus != 0f)
             textList += FormattedLine("{Defence bonus}: ${(defenceBonus * 100).toInt()}%")
@@ -142,6 +155,36 @@ class Terrain : RulesetStatsObject() {
         }
 
         return textList
+    }
+
+    /** Terrain filter matching is "pure" - input always returns same output, and it's called a bajillion times */
+    val cachedMatchesFilterResult = HashMap<String, Boolean>()
+
+    fun matchesFilter(filter: String, state: StateForConditionals? = null, multiFilter: Boolean = true): Boolean {
+        return if (multiFilter) MultiFilter.multiFilter(filter, {
+            cachedMatchesFilterResult.getOrPut(it) { matchesSingleFilter(it) } ||
+                state != null && hasUnique(it, state) ||
+                state == null && hasTagUnique(it)
+        })
+        else cachedMatchesFilterResult.getOrPut(filter) { matchesSingleFilter(filter) } ||
+            state != null && hasUnique(filter, state) ||
+            state == null && hasTagUnique(filter)
+    }
+
+    /** Implements [UniqueParameterType.TerrainFilter][com.unciv.models.ruleset.unique.UniqueParameterType.TerrainFilter] */
+    fun matchesSingleFilter(filter: String): Boolean {
+        return when (filter) {
+            in Constants.all -> true
+            name -> true
+            "Terrain" -> true
+            "Open terrain" -> !isRough()
+            "Rough terrain" -> isRough()
+            type.name -> true
+            "Natural Wonder" -> type == TerrainType.NaturalWonder
+            "Terrain Feature" -> type == TerrainType.TerrainFeature
+
+            else -> false
+        }
     }
 
     fun setTransients() {

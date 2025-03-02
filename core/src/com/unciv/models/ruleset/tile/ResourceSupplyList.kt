@@ -2,7 +2,7 @@ package com.unciv.models.ruleset.tile
 
 import com.unciv.Constants
 import com.unciv.models.ruleset.Ruleset
-import com.unciv.logic.city.IConstruction  // Kdoc only
+import com.unciv.models.ruleset.IConstruction  // Kdoc only
 
 /** Container helps aggregating supply and demand of [resources][ResourceSupply.resource], categorized by [origin][ResourceSupply.origin].
  *
@@ -25,7 +25,7 @@ class ResourceSupplyList(
 
     /** Fetch a [ResourceSupply] entry or `null` if no match found */
     fun get(resource: TileResource, origin: String) =
-        firstOrNull { it.resource == resource && it.origin == origin }
+        firstOrNull { it.resource.name == resource.name && it.origin == origin }
 
     /** Get the total amount for a resource by [resourceName] */
     fun sumBy(resourceName: String) =
@@ -62,7 +62,7 @@ class ResourceSupplyList(
             add(resourceSupply)
     }
 
-    /** Add entries from a requirements list (as produced by [IConstruction.getResourceRequirements]), expressing requirement as negative supply. */
+    /** Add entries from a requirements list (as produced by [IConstruction.getResourceRequirementsPerTurn]), expressing requirement as negative supply. */
     fun subtractResourceRequirements(resourceRequirements: HashMap<String, Int>, ruleset: Ruleset, origin: String) {
         for ((resourceName, amount) in resourceRequirements) {
             val resource = ruleset.tileResources[resourceName] ?: continue
@@ -96,9 +96,7 @@ class ResourceSupplyList(
      */
     fun removeAll(origin: String): ResourceSupplyList {
         // The filter creates a separate list so the iteration does not modify concurrently
-        filter { it.origin == origin }.forEach {
-            remove(it)
-        }
+        filter { it.origin == origin }.forEach { remove(it) }
         return this
     }
 

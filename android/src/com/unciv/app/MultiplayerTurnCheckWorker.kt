@@ -15,23 +15,30 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationCompat.DEFAULT_VIBRATE
 import androidx.core.app.NotificationManagerCompat
-import androidx.work.*
+import androidx.work.Constraints
+import androidx.work.Data
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.Worker
+import androidx.work.WorkerParameters
+import androidx.work.workDataOf
 import com.badlogic.gdx.Gdx
 import com.badlogic.gdx.backends.android.AndroidApplication
 import com.badlogic.gdx.backends.android.DefaultAndroidFiles
 import com.unciv.logic.GameInfo
-import com.unciv.logic.UncivFiles
+import com.unciv.logic.files.UncivFiles
 import com.unciv.logic.multiplayer.storage.FileStorageRateLimitReached
-import com.unciv.logic.multiplayer.storage.OnlineMultiplayerFiles
-import com.unciv.models.metadata.GameSettingsMultiplayer
-import kotlinx.coroutines.runBlocking
+import com.unciv.logic.multiplayer.storage.MultiplayerServer
+import com.unciv.models.metadata.GameSettings.GameSettingsMultiplayer
 import java.io.FileNotFoundException
 import java.io.PrintWriter
 import java.io.StringWriter
 import java.io.Writer
 import java.time.Duration
-import java.util.*
+import java.util.GregorianCalendar
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.runBlocking
 
 
 class MultiplayerTurnCheckWorker(appContext: Context, workerParams: WorkerParameters)
@@ -59,14 +66,14 @@ class MultiplayerTurnCheckWorker(appContext: Context, workerParams: WorkerParame
         private const val CONFIGURED_DELAY = "CONFIGURED_DELAY"
         private const val PERSISTENT_NOTIFICATION_ENABLED = "PERSISTENT_NOTIFICATION_ENABLED"
         private const val FILE_STORAGE = "FILE_STORAGE"
+        private const val AUTH_HEADER = "AUTH_HEADER"
+
+        private val constraints = Constraints.Builder()
+            // If no internet is available, worker waits before becoming active.
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
 
         fun enqueue(appContext: Context, delay: Duration, inputData: Data) {
-
-            val constraints = Constraints.Builder()
-                    // If no internet is available, worker waits before becoming active.
-                    .setRequiredNetworkType(NetworkType.CONNECTED)
-                    .build()
-
             val checkTurnWork = OneTimeWorkRequestBuilder<MultiplayerTurnCheckWorker>()
                     .setConstraints(constraints)
                     .setInitialDelay(delay.seconds, TimeUnit.SECONDS)
@@ -182,7 +189,11 @@ class MultiplayerTurnCheckWorker(appContext: Context, workerParams: WorkerParame
 
         fun startTurnChecker(applicationContext: Context, files: UncivFiles, currentGameInfo: GameInfo, settings: GameSettingsMultiplayer) {
             Log.i(LOG_TAG, "startTurnChecker")
+
+            // Games that haven't been updated in a week are considered stale
+            val oneWeekWorthOfMilliseconds = 1000*60*60*24*7
             val gameFiles = files.getMultiplayerSaves()
+                .filter { it.lastModified() > System.currentTimeMillis() - oneWeekWorthOfMilliseconds }
             val gameIds = Array(gameFiles.count()) {""}
             val gameNames = Array(gameFiles.count()) {""}
 
@@ -193,12 +204,13 @@ class MultiplayerTurnCheckWorker(appContext: Context, workerParams: WorkerParame
                     gameIds[count] = gamePreview.gameId
                     gameNames[count] = gameFile.name()
                     count++
-                } catch (ex: Throwable) {
+                } catch (_: Throwable) {
                     //only loadGamePreviewFromFile can throw an exception
                     //nothing will be added to the arrays if it fails
                     //just skip one file
                 }
             }
+            if (count==0) return // no games to update
 
             Log.d(LOG_TAG, "start gameNames: ${gameNames.contentToString()}")
 
@@ -213,7 +225,8 @@ class MultiplayerTurnCheckWorker(appContext: Context, workerParams: WorkerParame
                 val inputData = workDataOf(Pair(FAIL_COUNT, 0), Pair(GAME_ID, gameIds), Pair(GAME_NAME, gameNames),
                         Pair(USER_ID, settings.userId), Pair(CONFIGURED_DELAY, settings.turnCheckerDelay.seconds),
                         Pair(PERSISTENT_NOTIFICATION_ENABLED, settings.turnCheckerPersistentNotificationEnabled),
-                        Pair(FILE_STORAGE, settings.server))
+                        Pair(FILE_STORAGE, settings.server),
+                        Pair(AUTH_HEADER, settings.getAuthHeader()))
 
                 if (settings.turnCheckerPersistentNotificationEnabled) {
                     showPersistentNotification(applicationContext, "—", settings.turnCheckerDelay)
@@ -266,7 +279,7 @@ class MultiplayerTurnCheckWorker(appContext: Context, workerParams: WorkerParame
         val gdxFiles = DefaultAndroidFiles(applicationContext.assets, ContextWrapper(applicationContext), true)
         // GDX's AndroidFileHandle uses Gdx.files internally, so we need to set that to our new instance
         Gdx.files = gdxFiles
-        files = UncivFiles(gdxFiles, null, true)
+        files = UncivFiles(gdxFiles)
     }
 
     override fun doWork(): Result = runBlocking {
@@ -274,16 +287,17 @@ class MultiplayerTurnCheckWorker(appContext: Context, workerParams: WorkerParame
         val showPersistNotific = inputData.getBoolean(PERSISTENT_NOTIFICATION_ENABLED, true)
         val configuredDelay = getConfiguredDelay(inputData)
         val fileStorage = inputData.getString(FILE_STORAGE)
+        val authHeader = inputData.getString(AUTH_HEADER)!!
 
         try {
             val gameIds = inputData.getStringArray(GAME_ID)!!
             val gameNames = inputData.getStringArray(GAME_NAME)!!
-            Log.d(LOG_TAG, "doWork gameNames: ${Arrays.toString(gameNames)}")
+            Log.d(LOG_TAG, "doWork gameNames: ${gameNames.contentToString()}")
             // We only want to notify the user or update persisted notification once but still want
             // to download all games to update the files so we save the first one we find
             var foundGame: Pair<String, String>? = null
 
-            for (idx in 0 until gameIds.size){
+            for (idx in gameIds.indices) {
                 val gameId = gameIds[idx]
                 //gameId could be an empty string if startTurnChecker fails to load all files
                 if (gameId.isEmpty())
@@ -295,9 +309,9 @@ class MultiplayerTurnCheckWorker(appContext: Context, workerParams: WorkerParame
                 }
 
                 try {
-                    Log.d(LOG_TAG, "doWork download ${gameId}")
-                    val gamePreview = OnlineMultiplayerFiles(fileStorage).tryDownloadGamePreview(gameId)
-                    Log.d(LOG_TAG, "doWork download ${gameId} done")
+                    Log.d(LOG_TAG, "doWork download $gameId")
+                    val gamePreview = MultiplayerServer(fileStorage, mapOf("Authorization" to authHeader)).tryDownloadGamePreview(gameId)
+                    Log.d(LOG_TAG, "doWork download $gameId done")
                     val currentTurnPlayer = gamePreview.getCivilization(gamePreview.currentPlayer)
 
                     //Save game so MultiplayerScreen gets updated
@@ -319,7 +333,7 @@ class MultiplayerTurnCheckWorker(appContext: Context, workerParams: WorkerParame
                     Log.i(LOG_TAG, "doWork FileStorageRateLimitReached ${ex.message}")
                     // We just break here as the configured delay is probably enough to wait for the rate limit anyway
                     break
-                } catch (ex: FileNotFoundException){
+                } catch (ex: FileNotFoundException) {
                     Log.i(LOG_TAG, "doWork FileNotFoundException ${ex.message}")
                     // FileNotFoundException is thrown by OnlineMultiplayer().tryDownloadGamePreview(gameId)
                     // and indicates that there is no game preview present for this game
@@ -328,7 +342,7 @@ class MultiplayerTurnCheckWorker(appContext: Context, workerParams: WorkerParame
                 }
             }
 
-            if (foundGame != null){
+            if (foundGame != null) {
                 notifyUserAboutTurn(applicationContext, foundGame)
                 with(NotificationManagerCompat.from(applicationContext)) {
                     cancel(NOTIFICATION_ID_SERVICE)
@@ -358,7 +372,8 @@ class MultiplayerTurnCheckWorker(appContext: Context, workerParams: WorkerParame
                 val inputDataFailIncrease = Data.Builder().putAll(inputData).putInt(FAIL_COUNT, failCount + 1).build()
                 enqueue(applicationContext, Duration.ofMinutes(1), inputDataFailIncrease)
             }
-        } catch (outOfMemory: OutOfMemoryError){ // no point in trying multiple times if this was an oom error
+        } catch (outOfMemory: OutOfMemoryError) { // no point in trying multiple times if this was an oom error
+            Log.e(LOG_TAG, "doWork ${outOfMemory::class.simpleName}: ${outOfMemory.message}")
             return@runBlocking Result.failure()
         }
         return@runBlocking Result.success()

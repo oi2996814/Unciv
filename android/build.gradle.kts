@@ -1,5 +1,7 @@
+
+import com.unciv.build.AndroidImagePacker
 import com.unciv.build.BuildConfig
-import java.util.*
+import java.util.Properties
 
 plugins {
     id("com.android.application")
@@ -7,7 +9,7 @@ plugins {
 }
 
 android {
-    compileSdk = 32
+    compileSdk = 35
     sourceSets {
         getByName("main").apply {
             manifest.srcFile("AndroidManifest.xml")
@@ -19,15 +21,16 @@ android {
             jniLibs.srcDirs("libs")
         }
     }
-    packagingOptions {
+    packaging {
         resources.excludes += "META-INF/robovm/ios/robovm.xml"
         // part of kotlinx-coroutines-android, should not go into the apk
         resources.excludes += "DebugProbesKt.bin"
     }
     defaultConfig {
-        applicationId = "com.unciv.app"
+        namespace = BuildConfig.identifier
+        applicationId = BuildConfig.identifier
         minSdk = 21
-        targetSdk = 32 // See #5044
+        targetSdk = 35
         versionCode = BuildConfig.appCodeNumber
         versionName = BuildConfig.appVersion
 
@@ -44,7 +47,7 @@ android {
 
     signingConfigs {
         getByName("debug") {
-            storeFile = rootProject.file("debug.keystore")
+            storeFile = rootProject.file("android/debug.keystore")
             keyAlias = "androiddebugkey"
             keyPassword = "android"
             storePassword = "android"
@@ -52,29 +55,40 @@ android {
     }
 
     buildTypes {
-        getByName("release") {
+        debug {
+            isDebuggable = true
+        }
+        release {
             // If you make this true you get a version of the game that just flat-out doesn't run
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro")
+            isDebuggable = false
         }
-
     }
+
     lint {
         disable += "MissingTranslation"   // see res/values/strings.xml
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
-
         isCoreLibraryDesugaringEnabled = true
     }
     androidResources {
         // Don't add local save files and fonts to release, obviously
         ignoreAssetsPattern = "!SaveFiles:!fonts:!maps:!music:!mods"
     }
-    buildToolsVersion = "32.0.0"
+    buildFeatures {
+        renderScript = true
+        aidl = true
+    }
 }
 
+task("texturePacker") {
+    doFirst {
+        logger.info("Calling TexturePacker")
+        AndroidImagePacker.packImages(projectDir.path)
+    }
+}
 
 // called every time gradle gets executed, takes the native dependencies of
 // the natives configuration, and extracts them to the proper libs/ folders
@@ -96,6 +110,7 @@ task("copyAndroidNatives") {
             }
         }
     }
+    dependsOn("texturePacker")
 }
 
 tasks.whenTaskAdded {
@@ -126,14 +141,11 @@ tasks.register<JavaExec>("run") {
 }
 
 dependencies {
-    // Updating to latest version would require upgrading sourceCompatibility and targetCompatibility to 1_8, and targetSdk to 31 -
-    //   run `./gradlew build --scan` to see details
-    // Known Android Lint warning: "GradleDependency"
-    implementation("androidx.core:core-ktx:1.7.0")
-    implementation("androidx.work:work-runtime-ktx:2.7.1")
+    implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.work:work-runtime-ktx:2.10.0")
     // Needed to convert e.g. Android 26 API calls to Android 21
     // If you remove this run `./gradlew :android:lintDebug` to ensure everything's okay.
     // If you want to upgrade this, check it's working by building an apk,
     //   or by running `./gradlew :android:assembleRelease` which does that
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:1.1.5")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
