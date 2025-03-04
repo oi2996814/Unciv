@@ -72,11 +72,11 @@
         "name": "Liberty",
         "era": "Ancient era",
         "priorities": {
-            "Neutral": 0,
-            "Cultural": 0,
-            "Diplomatic": 10,
-            "Domination": 10,
-            "Scientific": 0
+            "Neutral": 10,
+            "Cultural": 10,
+            "Diplomatic": 20,
+            "Domination": 20,
+            "Scientific": 20
         },
         "uniques": ["[+1 Culture] [in all cities]"],
         "policies": [
@@ -93,7 +93,7 @@
             {
                 "name": "Citizenship",
                 "uniques": [
-                    "[-25]% tile improvement construction time",
+                    "Can build [all] improvements at a [+25]% rate",
                     "Free [Worker] appears"
                 ],
                 "row": 1,
@@ -103,7 +103,7 @@
                 "name": "Republic",
                 "uniques": [
                     "[+1 Production] [in all cities]",
-                    "[+5]% Production when constructing [All] buildings [in all cities]"
+                    "[+5]% Production when constructing [All] buildings [in all cities]",
                 ],
                 "requires": ["Collective Rule"],
                 "row": 2,
@@ -285,7 +285,10 @@
             "Domination": 0,
             "Scientific": 0
         },
-        "uniques": ["[-25]% City-State Influence degradation"],
+        "uniques": [
+            "[-25]% City-State Influence degradation",
+            "[-100]% weight to this choice for AI decisions <when number of [Remaining [City-State] Civilizations] is less than [2]>"
+        ],
         "policies": [
             {
                 "name": "Philantropy",
@@ -440,7 +443,7 @@
                     "[+1 Happiness] from every [Public School]"
                 ],
                 "row": 1,
-                "column": 5
+                "column": 4
             },
             {
                 "name": "Free Thought",
@@ -450,21 +453,21 @@
                 ],
                 "requires": ["Secularism"],
                 "row": 2,
-                "column": 1
+                "column": 2
             },
             {
                 "name": "Sovereignty",
                 "uniques": ["[+15]% [Science] <while the empire is happy>"],
                 "requires": ["Humanism"],
                 "row": 2,
-                "column": 5
+                "column": 4
             },
             {
                 "name": "Scientific Revolution",
                 "uniques": ["[2] Free Technologies"],
                 "requires": ["Free Thought"],
                 "row": 3,
-                "column": 1
+                "column": 2
             },
             {
                 "name": "Rationalism Complete",
@@ -555,13 +558,13 @@
                 "name": "Populism",
                 "uniques": ["[+25]% Strength <for [Wounded] units>"],
                 "row": 1,
-                "column": 1
+                "column": 2
             },
             {
                 "name": "Militarism",
                 "uniques": ["[Gold] cost of purchasing [All] units [-33]%"],
                 "row": 1,
-                "column": 5
+                "column": 4
             },
             {
                 "name": "Fascism",
@@ -570,7 +573,7 @@
                 ],
                 "requires": ["Populism", "Militarism"],
                 "row": 2,
-                "column": 3
+                "column": 2
             },
             {
                 "name": "Police State",
@@ -580,17 +583,17 @@
                 ],
                 "requires": ["Militarism"],
                 "row": 2,
-                "column": 5
+                "column": 4
             },
             {
                 "name": "Total War",
                 "uniques": [
                     "[+15]% Production when constructing [Military] units [in all cities]",
-                    "New [Military] units start with [15] Experience [in all cities]"
+                    "New [Military] units start with [15] XP [in all cities]"
                 ],
                 "requires": ["Police State", "Fascism"],
                 "row": 3,
-                "column": 4
+                "column": 3
             },
             {
                 "name": "Autocracy Complete",

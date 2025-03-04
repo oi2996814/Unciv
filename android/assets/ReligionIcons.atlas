@@ -2,7 +2,7 @@
 ReligionIcons.png
 size: 2048, 128
 format: RGBA8888
-filter: MipMapLinearLinear, MipMapLinearLinear
+filter: MipMapLinearLinear, Linear
 repeat: none
 ReligionIcons/Buddhism
   rotate: false
@@ -75,6 +75,13 @@ ReligionIcons/Pantheon
   offset: 0, 0
   index: -1
 ReligionIcons/Religion
+  rotate: false
+  xy: 1084, 4
+  size: 100, 100
+  orig: 100, 100
+  offset: 0, 0
+  index: -1
+ReligionIcons/Religions
   rotate: false
   xy: 1084, 4
   size: 100, 100

@@ -5,28 +5,28 @@ import com.badlogic.gdx.files.FileHandle
 import com.badlogic.gdx.graphics.Color
 import com.badlogic.gdx.graphics.Texture
 import com.badlogic.gdx.graphics.Texture.TextureFilter
-import com.badlogic.gdx.graphics.g2d.NinePatch
-import com.badlogic.gdx.graphics.g2d.TextureAtlas
-import com.badlogic.gdx.graphics.g2d.TextureRegion
+import com.badlogic.gdx.graphics.g2d.*
 import com.badlogic.gdx.scenes.scene2d.Actor
 import com.badlogic.gdx.scenes.scene2d.Group
 import com.badlogic.gdx.scenes.scene2d.ui.Image
+import com.badlogic.gdx.scenes.scene2d.ui.Label
 import com.badlogic.gdx.scenes.scene2d.ui.Table
-import com.badlogic.gdx.scenes.scene2d.utils.Drawable
 import com.badlogic.gdx.scenes.scene2d.utils.NinePatchDrawable
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable
 import com.badlogic.gdx.utils.Align
 import com.unciv.Constants
 import com.unciv.UncivGame
 import com.unciv.json.json
-import com.unciv.models.ruleset.Nation
+import com.unciv.models.ruleset.PerpetualConstruction
 import com.unciv.models.ruleset.Ruleset
-import com.unciv.models.ruleset.tile.ResourceType
+import com.unciv.models.ruleset.nation.Nation
+import com.unciv.models.ruleset.unit.BaseUnit
 import com.unciv.models.skins.SkinCache
-import com.unciv.models.stats.Stats
 import com.unciv.models.tilesets.TileSetCache
-import com.unciv.ui.utils.*
-import com.unciv.ui.utils.extensions.*
+import com.unciv.ui.components.NonTransformGroup
+import com.unciv.ui.components.extensions.*
+import com.unciv.ui.components.fonts.FontRulesetIcons
+import com.unciv.ui.screens.basescreen.BaseScreen
 import com.unciv.utils.debug
 import kotlin.math.atan2
 import kotlin.math.max
@@ -34,13 +34,11 @@ import kotlin.math.min
 import kotlin.math.sqrt
 
 object ImageGetter {
-    private const val whiteDotLocation = "OtherIcons/whiteDot"
+    const val whiteDotLocation = "OtherIcons/whiteDot"
+    const val circleLocation = "OtherIcons/Circle"
+    val CHARCOAL = Color(0x111111FF)
 
-    // When we used to load images directly from different files, without using a texture atlas,
-    // The draw() phase of the main screen would take a really long time because the BatchRenderer would
-    // always have to switch between like 170 different textures.
-    // So, we now use TexturePacker in the DesktopLauncher class to pack all the different images into single images,
-    // and the atlas is what tells us what was packed where.
+    // We use texture atlases to minimize texture swapping - see https://yairm210.medium.com/the-libgdx-performance-guide-1d068a84e181
     lateinit var atlas: TextureAtlas
     private val atlases = HashMap<String, TextureAtlas>()
     var ruleset = Ruleset()
@@ -50,55 +48,65 @@ object ImageGetter {
     private val textureRegionDrawables = HashMap<String, TextureRegionDrawable>()
     private val ninePatchDrawables = HashMap<String, NinePatchDrawable>()
 
+    fun getSpecificAtlas(name: String): TextureAtlas? = atlases[name]
+
     fun resetAtlases() {
         atlases.values.forEach { it.dispose() }
         atlases.clear()
-        atlas = TextureAtlas("game.atlas")
-        atlases["game"] = atlas
     }
 
+    fun reloadImages() = setNewRuleset(ruleset)
+
     /** Required every time the ruleset changes, in order to load mod-specific images */
-    fun setNewRuleset(ruleset: Ruleset) {
+    fun setNewRuleset(ruleset: Ruleset, ignoreIfModsAreEqual: Boolean = false) {
+        if (ignoreIfModsAreEqual && ruleset.mods == ImageGetter.ruleset.mods)
+            return
+            
         ImageGetter.ruleset = ruleset
         textureRegionDrawables.clear()
-        // These are the drawables from the base game
-        for (region in atlas.regions) {
-            val drawable = TextureRegionDrawable(region)
-            textureRegionDrawables[region.name] = drawable
-        }
 
-        // Load base (except game.atlas which is already loaded)
+        // Load base
         loadModAtlases("", Gdx.files.internal(""))
 
         // These are from the mods
         val visualMods = UncivGame.Current.settings.visualMods + ruleset.mods
         for (mod in visualMods) {
-            loadModAtlases(mod, Gdx.files.local("mods/$mod"))
+            loadModAtlases(mod, UncivGame.Current.files.getModFolder(mod))
         }
 
         TileSetCache.assembleTileSetConfigs(ruleset.mods)
         SkinCache.assembleSkinConfigs(ruleset.mods)
+
+        BaseScreen.setSkin()
+        FontRulesetIcons.addRulesetImages(ruleset)
     }
 
     /** Loads all atlas/texture files from a folder, as controlled by an Atlases.json */
-    fun loadModAtlases(mod: String, folder: FileHandle) {
+    private fun loadModAtlases(mod: String, folder: FileHandle) {
         // See #4993 - you can't .list() on a jar file, so the ImagePacker leaves us the list of actual atlases.
         val controlFile = folder.child("Atlases.json")
         val fileNames = (if (controlFile.exists()) json().fromJson(Array<String>::class.java, controlFile)
-            else emptyArray()).toMutableList()
-        if (mod.isNotEmpty()) fileNames += "game"
+            else emptyArray()).toMutableSet()
+        if (mod.isNotEmpty()) fileNames += "game"  // Backwards compatibility - when packed by 4.9.15+ this is already in the control file
         for (fileName in fileNames) {
             val file = folder.child("$fileName.atlas")
             if (!file.exists()) continue
             val extraAtlas = if (mod.isEmpty()) fileName else if (fileName == "game") mod else "$mod/$fileName"
             var tempAtlas = atlases[extraAtlas]  // fetch if cached
             if (tempAtlas == null) {
-                debug("Loading %s = %s", extraAtlas, file.path())
-                tempAtlas = TextureAtlas(file)  // load if not
-                atlases[extraAtlas] = tempAtlas  // cache the freshly loaded
+                try {
+                    debug("Loading %s = %s", extraAtlas, file.path())
+                    tempAtlas = TextureAtlas(file)  // load if not
+                    atlases[extraAtlas] = tempAtlas  // cache the freshly loaded
+                } catch (ex: Exception) {
+                    debug("Could not load file $file")
+                    continue
+                }
             }
             for (region in tempAtlas.regions) {
                 if (region.name.startsWith("Skins")) {
+                    // TODO: give user a mod warning that the image names has to be [name].9.png
+                    //      if this throws an exception
                     val ninePatch = tempAtlas.createPatch(region.name)
                     ninePatchDrawables[region.name] = NinePatchDrawable(ninePatch)
                 } else {
@@ -163,24 +171,54 @@ object ImageGetter {
         return layerList
     }
 
-    fun getWhiteDot() = getImage(whiteDotLocation)
+    fun getWhiteDot() = getImage(whiteDotLocation).apply { setSize(1f) }
+    fun getWhiteDotDrawable() = textureRegionDrawables[whiteDotLocation]!!
     fun getDot(dotColor: Color) = getWhiteDot().apply { color = dotColor }
 
-    fun getExternalImage(fileName: String): Image {
+    /** Finds an image file under /ExtraImages/, including Mods (which can override builtin).
+     *  Extension can be included or is guessed as png/jpg.
+     *  @return `null` if no match found.
+     */
+    fun findExternalImage(name: String): FileHandle? {
+        val folders = try { // For CI mod checker, we can't access "local" files
+            // since Gdx files are not set up
+            ruleset.mods.asSequence().map { UncivGame.Current.files.getLocalFile("mods/$it/ExtraImages") } +
+                    sequenceOf(Gdx.files.internal("ExtraImages"))
+        } catch (e: Exception) {
+            debug("Error loading mods: $e")
+            sequenceOf()
+        }
+        val extensions = sequenceOf("", ".png", ".jpg")
+        return folders.flatMap { folder ->
+            extensions.map { folder.child(name + it) }
+        }.firstOrNull { it.exists() }
+    }
+
+    /** Loads an image on the fly - uncached Texture, not too fast. */
+    fun getExternalImage(file: FileHandle): Image {
         // Since these are not packed in an atlas, they have no scaling filter metadata and
         // default to Nearest filter, anisotropic level 1. Use Linear instead, helps
         // loading screen and Tutorial.WorldScreen quite a bit. More anisotropy barely helps.
-        val texture = Texture("ExtraImages/$fileName")
+        val texture = Texture(file)
         texture.setFilter(TextureFilter.Linear, TextureFilter.Linear)
         return ImageWithCustomSize(TextureRegion(texture))
     }
+    /** Loads an image from (assets)/ExtraImages, from the jar if Unciv runs packaged.
+     *  Cannot load ExtraImages from a Mod - use [findExternalImage] and the [getExternalImage](FileHandle) overload instead.
+     */
+    fun getExternalImage(fileName: String) =
+        getExternalImage(Gdx.files.internal("ExtraImages/$fileName"))
 
-    fun getImage(fileName: String?): Image {
-        return ImageWithCustomSize(getDrawable(fileName))
-    }
+    fun getImage(fileName: String?, tintColor: Color? = null): Image = 
+        ImageWithCustomSize(getDrawable(fileName)).apply { color = tintColor ?: Color.WHITE }
 
-    fun getDrawable(fileName: String?): TextureRegionDrawable {
-        return textureRegionDrawables[fileName] ?: textureRegionDrawables[whiteDotLocation]!!
+    fun getDrawable(fileName: String?): TextureRegionDrawable =
+        textureRegionDrawables[fileName] ?: textureRegionDrawables[whiteDotLocation]!!
+
+    fun getDrawableOrNull(fileName: String?): TextureRegionDrawable? {
+        if (fileName == null)
+            return null
+        return textureRegionDrawables[fileName]
     }
 
     fun getNinePatch(fileName: String?, tintColor: Color? = null): NinePatchDrawable {
@@ -195,164 +233,71 @@ object ImageGetter {
         return drawable.tint(tintColor)
     }
 
-    @Deprecated("Use SkinStrings.getUiBackground instead to make UI element moddable", ReplaceWith("BaseScreen.skinStrings.getUiBackground(path, BaseScreen.skinStrings.roundedEdgeRectangle, tintColor)", "com.unciv.ui.utils.BaseScreen"))
-    fun getRoundedEdgeRectangle(tintColor: Color? = null): NinePatchDrawable {
-        val drawable = getNinePatch("Skins/${UncivGame.Current.settings.skin}/roundedEdgeRectangle")
-
-        if (tintColor == null) return drawable
-        return drawable.tint(tintColor)
-    }
-
-    @Deprecated("Use SkinStrings.getUiBackground instead to make UI element moddable", ReplaceWith("BaseScreen.skinStrings.getUiBackground(path, BaseScreen.skinStrings.rectangleWithOutline)", "com.unciv.ui.utils.BaseScreen"))
-    fun getRectangleWithOutline(): NinePatchDrawable {
-        return getNinePatch("Skins/${UncivGame.Current.settings.skin}/rectangleWithOutline")
-    }
-
-    @Deprecated("Use SkinStrings.getUiBackground instead to make UI element moddable", ReplaceWith("BaseScreen.skinStrings.getUiBackground(path, BaseScreen.skinStrings.selectBox)", "com.unciv.ui.utils.BaseScreen"))
-    fun getSelectBox(): NinePatchDrawable {
-        return getNinePatch("Skins/${UncivGame.Current.settings.skin}/select-box")
-    }
-
-    @Deprecated("Use SkinStrings.getUiBackground instead to make UI element moddable", ReplaceWith("BaseScreen.skinStrings.getUiBackground(path, BaseScreen.skinStrings.selectBoxPressed)", "com.unciv.ui.utils.BaseScreen"))
-    fun getSelectBoxPressed(): NinePatchDrawable {
-        return getNinePatch("Skins/${UncivGame.Current.settings.skin}/select-box-pressed")
-    }
-
-    @Deprecated("Use SkinStrings.getUiBackground instead to make UI element moddable", ReplaceWith("BaseScreen.skinStrings.getUiBackground(path, BaseScreen.skinStrings.checkbox)", "com.unciv.ui.utils.BaseScreen"))
-    fun getCheckBox(): NinePatchDrawable {
-        return getNinePatch("Skins/${UncivGame.Current.settings.skin}/checkbox")
-    }
-
-    @Deprecated("Use SkinStrings.getUiBackground instead to make UI element moddable", ReplaceWith("BaseScreen.skinStrings.getUiBackground(path, BaseScreen.skinStrings.checkboxPressed)", "com.unciv.ui.utils.BaseScreen"))
-    fun getCheckBoxPressed(): NinePatchDrawable {
-        return getNinePatch("Skins/${UncivGame.Current.settings.skin}/checkbox-pressed")
-    }
-
     fun imageExists(fileName: String) = textureRegionDrawables.containsKey(fileName)
-    fun techIconExists(techName: String) = imageExists("TechIcons/$techName")
-    fun unitIconExists(unitName: String) = imageExists("UnitIcons/$unitName")
     fun ninePatchImageExists(fileName: String) = ninePatchDrawables.containsKey(fileName)
 
-    fun getStatIcon(statName: String): Image {
-        return getImage("StatIcons/$statName")
-                .apply { setSize(20f, 20f) }
-    }
-
-    fun getUnitIcon(unitName: String, color: Color = Color.BLACK): Image {
-        return getImage("UnitIcons/$unitName").apply { this.color = color }
-    }
-
-
-
-    fun getNationIndicator(nation: Nation, size: Float): IconCircleGroup {
-        val civIconName = if (nation.isCityState()) "CityState" else nation.name
-        return if (nationIconExists(civIconName)) {
-            val cityStateIcon = getNationIcon(civIconName)
-            cityStateIcon.color = nation.getInnerColor()
-            cityStateIcon.surroundWithCircle(size * 0.9f).apply { circle.color = nation.getOuterColor() }
-                    .surroundWithCircle(size, false).apply { circle.color = nation.getInnerColor() }
-        } else getCircle().apply { color = nation.getOuterColor() }
-                .surroundWithCircle(size).apply { circle.color = nation.getInnerColor() }
-    }
-
-    fun getRandomNationIndicator(size: Float): IconCircleGroup {
-        return "?"
-            .toLabel(Color.WHITE, (size * 5f/8f).toInt())
-            .apply { this.setAlignment(Align.center) }
-            .surroundWithCircle(size * 0.9f).apply { circle.color = Color.BLACK }
-            .surroundWithCircle(size, false).apply { circle.color = Color.WHITE }
-    }
-
-    private fun nationIconExists(nation: String) = imageExists("NationIcons/$nation")
-    fun getNationIcon(nation: String) = getImage("NationIcons/$nation")
+    fun getStatIcon(statName: String): Image = getImage("StatIcons/$statName")
+            .apply { setSize(20f, 20f) }
 
     fun wonderImageExists(wonderName: String) = imageExists("WonderImages/$wonderName")
     fun getWonderImage(wonderName: String) = getImage("WonderImages/$wonderName")
 
-    private fun getColorFromStats(stats: Stats): Color? {
-        if (stats.asSequence().none { it.value > 0 }) return Color.WHITE
-        val highestStat = stats.asSequence().maxByOrNull { it.value }!!
-        return highestStat.key.color
-    }
+    fun getNationIcon(nation: String) = getImage("NationIcons/$nation")
+    fun getNationPortrait(nation: Nation, size: Float): Portrait = PortraitNation(nation.name, size)
 
+    fun getRandomNationPortrait(size: Float): Portrait = PortraitNation(Constants.random, size)
 
-    fun getImprovementIcon(improvementName: String, size: Float = 20f): Group {
-        if (improvementName.startsWith(Constants.remove) || improvementName == Constants.cancelImprovementOrder)
-            return getImage("OtherIcons/Stop").surroundWithCircle(size)
+    fun getUnitIcon(unit: BaseUnit, color: Color = CHARCOAL): Image =
+        if (imageExists("UnitIcons/${unit.name}"))
+            getImage("UnitIcons/${unit.name}").apply { this.color = color }
+        else getImage("UnitTypeIcons/${unit.type}").apply { this.color = color }
 
-        val iconGroup = getImage("ImprovementIcons/$improvementName").surroundWithCircle(size)
-
-        val improvement = ruleset.tileImprovements[improvementName]
-        if (improvement != null)
-            iconGroup.circle.color = getColorFromStats(improvement)
-
-        return iconGroup
-    }
-
-    fun getConstructionImage(construction: String): Image {
-        if (ruleset.buildings.containsKey(construction)) return getImage("BuildingIcons/$construction")
-        if (ruleset.units.containsKey(construction)) return getUnitIcon(construction)
-        if (construction == "Nothing") return getImage("OtherIcons/Sleep")
-        return getStatIcon(construction)
-    }
-
-    fun getPromotionIcon(promotionName: String, size: Float = 30f): Actor {
-        val nameWithoutBrackets = promotionName.replace("[", "").replace("]", "")
-
-        var level = when {
-            nameWithoutBrackets.endsWith(" I") -> 1
-            nameWithoutBrackets.endsWith(" II") -> 2
-            nameWithoutBrackets.endsWith(" III") -> 3
-            else -> 0
+    fun getConstructionPortrait(construction: String, size: Float): Group {
+        if (ruleset.buildings.containsKey(construction)) {
+            return PortraitBuilding(construction, size)
         }
-
-        val basePromotionName = nameWithoutBrackets.dropLast(if (level == 0) 0 else level + 1)
-
-        val imageAttempter = ImageAttempter(Unit)
-            .tryImage { "UnitPromotionIcons/$nameWithoutBrackets" }
-            .tryImage { "UnitPromotionIcons/$basePromotionName" }
-            .tryImage { "UnitIcons/${basePromotionName.removeSuffix(" ability")}" }
-
-        if (imageAttempter.getPathOrNull() != null && imageAttempter.getPath()!!.endsWith(nameWithoutBrackets))
-            level = 0
-
-        val circle = imageAttempter.getImage()
-            .apply { color = colorFromRGB(255, 226, 0) }
-            .surroundWithCircle(size)
-            .apply { circle.color = colorFromRGB(0, 12, 49) }
-
-        if (level != 0) {
-            val padding = if (level == 3) 0.5f else 2f
-            val starTable = Table().apply { defaults().pad(padding) }
-            for (i in 1..level) starTable.add(getImage("OtherIcons/Star")).size(size / 4f)
-            starTable.centerX(circle)
-            starTable.y = size / 6f
-            circle.addActor(starTable)
+        if (ruleset.units.containsKey(construction)) {
+            return PortraitUnit(construction, size)
         }
-        return circle
+        if (PerpetualConstruction.perpetualConstructionsMap.containsKey(construction))
+            return getImage("OtherIcons/Convert$construction").toGroup(size)
+        return getStatIcon(construction).surroundWithCircle(size).surroundWithThinCircle()
+    }
+
+    fun getUniquePortrait(uniqueName: String, size: Float): Group = PortraitUnique(uniqueName, size)
+
+    fun getPromotionPortrait(promotionName: String, size: Float = 30f): Group = PortraitPromotion(promotionName, size)
+
+    fun getResourcePortrait(resourceName: String, size: Float, amount: Int= 0): Group =
+        PortraitResource(resourceName, size, amount)
+
+    fun getTechIconPortrait(techName: String, circleSize: Float): Group = PortraitTech(techName, circleSize)
+
+    fun getImprovementPortrait(improvementName: String, size: Float = 20f, isPillaged: Boolean = false): Portrait =
+        PortraitImprovement(improvementName, size, false, isPillaged)
+
+    fun getUnitActionPortrait(actionName: String, size: Float = 20f): Portrait = PortraitUnitAction(actionName, size)
+
+    fun getReligionIcon(iconName: String): Image { return getImage("ReligionIcons/$iconName") }
+    fun getReligionPortrait(iconName: String, size: Float): Portrait {
+        if (religionIconExists(iconName))
+            return PortraitReligion(iconName, size)
+        val typeName = ruleset.beliefs[iconName]?.type?.name
+        if (typeName != null && religionIconExists(typeName))
+            return PortraitReligion(typeName, size)
+        return PortraitReligion(iconName, size)
     }
 
     fun religionIconExists(iconName: String) = imageExists("ReligionIcons/$iconName")
-    fun getReligionImage(iconName: String): Image {
-        return getImage("ReligionIcons/$iconName")
-    }
-    fun getCircledReligionIcon(iconName: String, size: Float): IconCircleGroup {
-        return getReligionImage(iconName).surroundWithCircle(size, color = Color.BLACK )
+
+    fun getCircleDrawable() = getDrawable(circleLocation)
+    fun getCircle() = getImage(circleLocation)
+    fun getCircle(color: Color = Color.WHITE, size: Float? = null) = getCircle().apply {
+        setColor(color)
+        if (size != null) setSize(size, size)
     }
 
-    @Deprecated("Use skin defined base color instead", ReplaceWith("BaseScreen.skinStrings.skinConfig.baseColor", "com.unciv.ui.utils.BaseScreen"))
-    fun getBlue() = Color(0x004085bf)
-
-    fun getCircle() = getImage("OtherIcons/Circle")
     fun getTriangle() = getImage("OtherIcons/Triangle")
-
-    @Deprecated("Use SkinStrings.getUiBackground instead to make UI element moddable", ReplaceWith("BaseScreen.skinStrings.getUiBackground(path, tintColor=color)", "com.unciv.ui.utils.BaseScreen"))
-    fun getBackground(color: Color): Drawable {
-        val drawable = getDrawable("")
-        drawable.minHeight = 0f
-        drawable.minWidth = 0f
-        return drawable.tint(color)
-    }
 
     fun getRedCross(size: Float, alpha: Float): Actor {
         val redCross = getImage("OtherIcons/Close")
@@ -361,8 +306,7 @@ object ImageGetter {
         return redCross
     }
 
-    fun getCrossedImage(image: Actor, iconSize: Float) = Group().apply {
-            isTransform = false
+    fun getCrossedImage(image: Actor, iconSize: Float) = NonTransformGroup().apply {
             setSize(iconSize, iconSize)
             image.center(this)
             addActor(image)
@@ -371,7 +315,7 @@ object ImageGetter {
             addActor(cross)
         }
 
-    fun getArrowImage(align:Int = Align.right): Image {
+    fun getArrowImage(align: Int = Align.right): Image {
         val image = getImage("OtherIcons/ArrowRight")
         image.setOrigin(Align.center)
         if (align == Align.left) image.rotation = 180f
@@ -380,57 +324,96 @@ object ImageGetter {
         return image
     }
 
-    fun getResourceImage(resourceName: String, size: Float): IconCircleGroup {
-        val iconGroup = getImage("ResourceIcons/$resourceName").surroundWithCircle(size)
-        val resource = ruleset.tileResources[resourceName]
-                ?: return iconGroup // This is the result of a bad modding setup, just give em an empty circle. Their problem.
-        iconGroup.circle.color = getColorFromStats(resource)
-
-        if (resource.resourceType == ResourceType.Luxury) {
-            val happiness = getStatIcon("Happiness")
-            happiness.setSize(size / 2, size / 2)
-            happiness.x = iconGroup.width - happiness.width
-            iconGroup.addActor(happiness)
-        }
-        if (resource.resourceType == ResourceType.Strategic) {
-            val production = getStatIcon("Production")
-            production.setSize(size / 2, size / 2)
-            production.x = iconGroup.width - production.width
-            iconGroup.addActor(production)
-        }
-        return iconGroup
+    fun getProgressBarVertical(
+        width: Float,
+        height: Float,
+        percentComplete: Float,
+        progressColor: Color,
+        backgroundColor: Color,
+        progressPadding: Float = 0f): ProgressBar {
+        return ProgressBar(width, height, true)
+                .setBackground(backgroundColor)
+                .setProgress(progressColor, percentComplete, padding = progressPadding)
     }
 
-    fun getTechIconGroup(techName: String, circleSize: Float) = getTechIcon(techName).surroundWithCircle(circleSize)
+    class ProgressBar(width: Float, height: Float, val vertical: Boolean = true) : NonTransformGroup() {
 
-    fun getTechIcon(techName: String): Image {
-        val techIconColor = ruleset.eras[ruleset.technologies[techName]?.era()]?.getColor()
-            ?: return getWhiteDot()
-        return getImage("TechIcons/$techName").apply { color = techIconColor.darken(0.6f) }
-    }
+        var primaryPercentage: Float = 0f
+        var secondaryPercentage: Float = 0f
 
-    fun getProgressBarVertical(width: Float, height: Float, percentComplete: Float, progressColor: Color, backgroundColor: Color): Group {
-        return VerticalProgressBar(width, height)
-                .addColor(backgroundColor, 1f)
-                .addColor(progressColor, percentComplete)
-    }
+        var label: Label? = null
+        var background: Image? = null
+        var secondaryProgress: Image? = null
+        var primaryProgress: Image? = null
 
-    class VerticalProgressBar(width: Float, height: Float):Group() {
         init {
             setSize(width, height)
-            isTransform = false
         }
 
-        fun addColor(color: Color, percentage: Float): VerticalProgressBar {
-            val bar = getWhiteDot()
-            bar.color = color
-            bar.setSize(width, height *  max(min(percentage, 1f),0f)) //clamp between 0 and 1
-            addActor(bar)
+        override fun draw(batch: Batch?, parentAlpha: Float) = super.draw(batch, parentAlpha)
+
+        fun setLabel(color: Color, text: String, fontSize: Int = Constants.defaultFontSize) : ProgressBar {
+            label = text.toLabel()
+            label?.setAlignment(Align.center)
+            label?.setFontColor(color)
+            label?.setFontSize(fontSize)
+            label?.toFront()
+            label?.center(this)
+            if (label != null)
+                addActor(label)
+            return this
+        }
+
+        fun setBackground(color: Color): ProgressBar {
+            background = getWhiteDot()
+            background?.color = color.cpy()
+            background?.setSize(width, height) //clamp between 0 and 1
+            background?.toBack()
+            background?.center(this)
+            if (background != null)
+                addActor(background)
+            return this
+        }
+
+        fun setSemiProgress(color: Color, percentage: Float, padding: Float = 0f): ProgressBar {
+            secondaryPercentage = percentage
+            secondaryProgress = getWhiteDot()
+            secondaryProgress?.color = color.cpy()
+            if (vertical)
+                secondaryProgress?.setSize(width-padding*2, height *  max(min(percentage, 1f),0f))
+            else
+                secondaryProgress?.setSize(width *  max(min(percentage, 1f),0f), height-padding*2)
+            if (secondaryProgress != null) {
+                addActor(secondaryProgress)
+                if (vertical)
+                    secondaryProgress?.centerX(this)
+                else
+                    secondaryProgress?.centerY(this)
+            }
+            primaryProgress?.toFront()
+            return this
+        }
+
+        fun setProgress(color: Color, percentage: Float, padding: Float = 0f): ProgressBar {
+            primaryPercentage = percentage
+            primaryProgress = getWhiteDot()
+            primaryProgress?.color = color.cpy()
+            if (vertical)
+                primaryProgress?.setSize(width-padding*2, height *  max(min(percentage, 1f),0f))
+            else
+                primaryProgress?.setSize(width *  max(min(percentage, 1f),0f), height-padding*2)
+            if (primaryProgress != null) {
+                addActor(primaryProgress)
+                if (vertical)
+                    primaryProgress?.centerX(this)
+                else
+                    primaryProgress?.centerY(this)
+            }
             return this
         }
     }
 
-    fun getHealthBar(currentHealth: Float, maxHealth: Float, healthBarSize: Float): Table {
+    fun getHealthBar(currentHealth: Float, maxHealth: Float, healthBarSize: Float, height: Float=5f): Table {
         val healthPercent = currentHealth / maxHealth
         val healthBar = Table()
 
@@ -440,14 +423,14 @@ object ImageGetter {
             healthPercent > 1 / 3f -> Color.ORANGE
             else -> Color.RED
         }
-        healthBar.add(healthPartOfBar).size(healthBarSize * healthPercent, 5f)
+        healthBar.add(healthPartOfBar).size(healthBarSize * healthPercent, height)
 
-        val emptyPartOfBar = getDot(Color.BLACK)
-        healthBar.add(emptyPartOfBar).size(healthBarSize * (1 - healthPercent), 5f)
+        val emptyPartOfBar = getDot(CHARCOAL)
+        healthBar.add(emptyPartOfBar).size(healthBarSize * (1 - healthPercent), height)
 
         healthBar.pad(1f)
         healthBar.pack()
-        healthBar.background = getBackground(Color.BLACK)
+        healthBar.background = BaseScreen.skinStrings.getUiBackground("General/HealthBar", tintColor = CHARCOAL)
         return healthBar
     }
 
@@ -482,9 +465,24 @@ object ImageGetter {
         specialist.color = color
         return specialist
     }
+    
+    fun getAllImageNames() = textureRegionDrawables.keys
 
     fun getAvailableSkins() = ninePatchDrawables.keys.asSequence().map { it.split("/")[1] }.distinct()
 
-    fun getAvailableTilesets() = textureRegionDrawables.keys.asSequence().filter { it.startsWith("TileSets") }
-            .map { it.split("/")[1] }.distinct()
+    /** Determines available TileSets from the currently loaded Texture paths.
+     *
+     *  Note [TileSetCache] will not necessarily load all of them, e.g. if a Mod fails
+     *  to provide a config json for a graphic with a Tileset path.
+     *
+     *  Intersect with [TileSetCache.getAvailableTilesets] for a more reliable answer
+     */
+    fun getAvailableTilesets() = textureRegionDrawables.keys.asSequence()
+        .filter { it.startsWith("TileSets") && !it.contains("/Units/") }
+        .map { it.split("/")[1] }.distinct()
+
+    fun getAvailableUnitsets() = textureRegionDrawables.keys.asSequence()
+        .filter { it.startsWith("TileSets") && it.contains("/Units/") }
+        .map { it.split("/")[1] }
+        .distinct()
 }

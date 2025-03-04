@@ -1,10 +1,11 @@
 package com.unciv.logic.battle
 
-import com.unciv.logic.map.MapUnit
-import com.unciv.logic.map.TileInfo
+import com.unciv.logic.automation.unit.SpecificUnitAutomation
+import com.unciv.logic.map.mapunit.MapUnit
+import com.unciv.logic.map.tile.Tile
+import com.unciv.models.ruleset.unique.StateForConditionals
 import com.unciv.models.ruleset.unique.Unique
 import com.unciv.models.ruleset.unique.UniqueType
-import com.unciv.logic.automation.unit.SpecificUnitAutomation  // for Kdoc
 
 
 object GreatGeneralImplementation {
@@ -19,21 +20,27 @@ object GreatGeneralImplementation {
     }
 
     /**
-     * Determine the "Great General" bonus for [unit] by searching for units carrying the [UniqueType.StrengthBonusInRadius] in the vicinity.
+     * Determine the "Great General" bonus for [ourUnitCombatant] by searching for units carrying the [UniqueType.StrengthBonusInRadius] in the vicinity.
      *
      * Used by [BattleDamage.getGeneralModifiers].
      *
      * @return A pair of unit's name and bonus (percentage) as Int (typically 15), or 0 if no applicable Great General equivalents found
      */
-    fun getGreatGeneralBonus(unit: MapUnit): Pair<String, Int> {
-        val civInfo = unit.civInfo
-        val allGenerals = civInfo.getCivUnits()
-            .filter { it.hasStrengthBonusInRadiusUnique }
+    fun getGreatGeneralBonus(
+        ourUnitCombatant: MapUnitCombatant,
+        enemy: ICombatant,
+        combatAction: CombatAction
+    ): Pair<String, Int> {
+        val unit = ourUnitCombatant.unit
+        val civInfo = ourUnitCombatant.unit.civ
+        val allGenerals = civInfo.units.getCivUnits()
+            .filter { it.cache.hasStrengthBonusInRadiusUnique }
         if (allGenerals.none()) return Pair("", 0)
 
         val greatGeneral = allGenerals
             .flatMap { general ->
-                general.getMatchingUniques(UniqueType.StrengthBonusInRadius)
+                general.getMatchingUniques(UniqueType.StrengthBonusInRadius,
+                    StateForConditionals(unit.civ, ourCombatant = ourUnitCombatant, theirCombatant = enemy, combatAction = combatAction))
                     .map { GeneralBonusData(general, it) }
             }.filter {
                 // Support the border case when a mod unit has several
@@ -56,7 +63,7 @@ object GreatGeneralImplementation {
      *
      * Used by [SpecificUnitAutomation.automateGreatGeneral].
      */
-    fun getBestAffectedTroopsTile(general: MapUnit): TileInfo? {
+    fun getBestAffectedTroopsTile(general: MapUnit): Tile? {
         // Normally we have only one Unique here. But a mix is not forbidden, so let's try to support mad modders.
         // (imagine several GreatGeneralAura uniques - +50% at radius 1, +25% at radius 2, +5% at radius 3 - possibly learnable from promotions via buildings or natural wonders?)
 
@@ -73,7 +80,7 @@ object GreatGeneralImplementation {
             .map { it.key }
             .filter { tile ->
                 val militaryUnit = tile.militaryUnit
-                militaryUnit != null && militaryUnit.civInfo == general.civInfo
+                militaryUnit != null && militaryUnit.civ == general.civ
                         && (tile.civilianUnit == null || tile.civilianUnit == general)
                         && militaryUnit.getMaxMovement() <= unitMaxMovement
                         && !tile.isCityCenter()
@@ -82,14 +89,20 @@ object GreatGeneralImplementation {
         // rank tiles and find best
         val unitBonusRadius = generalBonusData.maxOfOrNull { it.radius }
             ?: return null
+        
+        val militaryUnitToHasAttackableEnemies = HashMap<MapUnit, Boolean>()
+
         return militaryUnitTilesInDistance
             .maxByOrNull { unitTile ->
-                unitTile.getTilesInDistance(unitBonusRadius).sumOf { auraTile ->
-                    val militaryUnit = auraTile.militaryUnit
-                    if (militaryUnit == null || militaryUnit.civInfo != general.civInfo) 0
+                unitTile.getTilesInDistance(unitBonusRadius).sumOf { affectedTile ->
+                    val militaryUnit = affectedTile.militaryUnit
+                    if (militaryUnit == null || militaryUnit.civ != general.civ || militaryUnit.isEmbarked()) 0
+                    else if (militaryUnitToHasAttackableEnemies.getOrPut(militaryUnit) {
+                            TargetHelper.getAttackableEnemies(militaryUnit, militaryUnit.movement.getDistanceToTiles()).isEmpty()
+                        }) 0
                     else generalBonusData.firstOrNull {
                         // "Military" as commented above only a small optimization
-                        auraTile.aerialDistanceTo(unitTile) <= it.radius
+                        affectedTile.aerialDistanceTo(unitTile) <= it.radius
                                 && (it.filter == "Military" || militaryUnit.matchesFilter(it.filter))
                     }?.bonus ?: 0
                 }

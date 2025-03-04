@@ -4,8 +4,11 @@ import com.unciv.logic.IsPartOfGameInfoSerialization
 import com.unciv.models.ruleset.unique.UniqueTarget
 import com.unciv.models.stats.Stat
 import com.unciv.models.translations.tr
-import com.unciv.ui.civilopedia.FormattedLine
-import com.unciv.ui.utils.Fonts
+import com.unciv.ui.components.fonts.Fonts
+import com.unciv.ui.screens.civilopediascreen.FormattedLine
+import java.util.*
+import kotlin.collections.ArrayList
+import kotlin.collections.HashMap
 import kotlin.math.abs
 
 class Speed : RulesetObject(), IsPartOfGameInfoSerialization {
@@ -32,14 +35,15 @@ class Speed : RulesetObject(), IsPartOfGameInfoSerialization {
         }
     }
 
-    val statCostModifiers: HashMap<Stat, Float> by lazy {
-        val map = HashMap<Stat, Float>()
-        for (stat in Stat.values()) {
+    val statCostModifiers: EnumMap<Stat, Float> by lazy {
+        val map = EnumMap<Stat, Float>(Stat::class.java)
+        for (stat in Stat.entries) {
             val modifier = when (stat) {
                 Stat.Production -> productionCostModifier
                 Stat.Gold -> goldCostModifier
                 Stat.Science -> scienceCostModifier
                 Stat.Faith -> faithCostModifier
+                Stat.Culture -> cultureCostModifier
                 else -> 1f
             }
             map[stat] = modifier
@@ -53,9 +57,10 @@ class Speed : RulesetObject(), IsPartOfGameInfoSerialization {
         const val DEFAULTFORSIMULATION: String = "Standard"
     }
 
+    // Note: Speed is IHasUniques, but no implementation reads them, thus no UniqueType accepts this target
     override fun getUniqueTarget(): UniqueTarget = UniqueTarget.Speed
 
-    override fun makeLink(): String = "GameSpeed/$name"
+    override fun makeLink(): String = "Speed/$name"
     override fun getCivilopediaTextHeader() = FormattedLine(name, header = 2)
     override fun getCivilopediaTextLines(ruleset: Ruleset) = sequence {
         yield(FormattedLine("General speed modifier: [${modifier * 100}]%${Fonts.turn}"))
@@ -79,12 +84,7 @@ class Speed : RulesetObject(), IsPartOfGameInfoSerialization {
     fun numTotalTurns(): Int = yearsPerTurn.last().untilTurn
 }
 
-class YearsPerTurn {
-    var yearInterval: Float = 0f
-    var untilTurn: Int = 0
-
-    constructor(yearsPerTurn: Float, turnsPerIncrement: Int) {
-        this.yearInterval = yearsPerTurn
-        this.untilTurn = turnsPerIncrement
-    }
+class YearsPerTurn(yearsPerTurn: Float, turnsPerIncrement: Int) {
+    var yearInterval: Float = yearsPerTurn
+    var untilTurn: Int = turnsPerIncrement
 }

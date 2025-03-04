@@ -3,18 +3,18 @@ package com.unciv.logic.trade
 import com.unciv.Constants
 import com.unciv.UncivGame
 import com.unciv.logic.IsPartOfGameInfoSerialization
-import com.unciv.logic.trade.TradeType.TradeTypeNumberType
+import com.unciv.logic.trade.TradeOfferType.TradeTypeNumberType
 import com.unciv.models.ruleset.Speed
 import com.unciv.models.translations.tr
-import com.unciv.ui.utils.Fonts
+import com.unciv.ui.components.fonts.Fonts
 
-data class TradeOffer(val name: String, val type: TradeType, var amount: Int = 1, var duration: Int) : IsPartOfGameInfoSerialization {
+data class TradeOffer(val name: String, val type: TradeOfferType, var amount: Int = 1, var duration: Int) : IsPartOfGameInfoSerialization {
 
     constructor(
         name: String,
-        type: TradeType,
+        type: TradeOfferType,
         amount: Int = 1,
-        speed: Speed = UncivGame.Current.gameInfo!!.speed
+        speed: Speed
     ) : this(name, type, amount, duration = -1) {
         duration = when {
             type.isImmediate -> -1 // -1 for offers that are immediate (e.g. gold transfer)
@@ -23,9 +23,9 @@ data class TradeOffer(val name: String, val type: TradeType, var amount: Int = 1
         }
     }
 
-    constructor() : this("", TradeType.Gold, duration = -1) // so that the json deserializer can work
+    constructor() : this("", TradeOfferType.Gold, duration = -1) // so that the json deserializer can work
 
-    @Suppress("CovariantEquals")    // This is an overload, not an override of the built-in equals(Any?)
+    @Suppress("CovariantEquals", "WrongEqualsTypeParameter")    // This is an overload, not an override of the built-in equals(Any?)
     fun equals(offer: TradeOffer): Boolean {
         return offer.name == name
                 && offer.type == type
@@ -35,15 +35,19 @@ data class TradeOffer(val name: String, val type: TradeType, var amount: Int = 1
     fun isTradable() = amount > 0
 
     fun getOfferText(untradable: Int = 0): String {
-        var offerText = when(type){
-            TradeType.WarDeclaration -> "Declare war on [$name]"
-            TradeType.Introduction -> "Introduction to [$name]"
-            TradeType.City -> UncivGame.Current.gameInfo!!.getCities().firstOrNull{ it.id == name }?.name ?: "Non-existent city"
+        var offerText = when(type) {
+            TradeOfferType.WarDeclaration -> "Declare war on [$name]"
+            TradeOfferType.Introduction -> "Introduction to [$name]"
+            TradeOfferType.City -> {
+                val city =
+                        UncivGame.Current.gameInfo!!.getCities().firstOrNull { it.id == name }
+                city?.run { "{$name} (${population.population})" } ?: "Non-existent city"
+            }
             else -> name
-        }.tr()
+        }.tr(hideIcons = true)
 
-        if (type.numberType == TradeTypeNumberType.Simple || name == Constants.researchAgreement) offerText += " ($amount)"
-        else if (type.numberType == TradeTypeNumberType.Gold) offerText += " ($amount)"
+        if (type.numberType == TradeTypeNumberType.Simple || type.numberType == TradeTypeNumberType.Gold) offerText += " ($amount)"
+        else if (name == Constants.researchAgreement) offerText += " (-$amount${Fonts.gold})"
 
         if (duration > 0) offerText += "\n" + duration + Fonts.turn
 

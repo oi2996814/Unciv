@@ -1,1 +1,2 @@
-include("desktop", "android", "ios", "core", "tests", "server")
+include("desktop", "core", "tests", "server")
+if (System.getenv("ANDROID_HOME") != null) include("android")

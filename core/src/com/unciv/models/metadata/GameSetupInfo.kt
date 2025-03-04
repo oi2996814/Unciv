@@ -4,10 +4,11 @@ import com.badlogic.gdx.files.FileHandle
 import com.unciv.UncivGame
 import com.unciv.logic.GameInfo
 import com.unciv.logic.map.MapParameters
+import com.unciv.logic.map.MapShape
 
 class GameSetupInfo(
-    var gameParameters: GameParameters = GameParameters(),
-    var mapParameters: MapParameters = MapParameters()
+    val gameParameters: GameParameters = GameParameters(),
+    val mapParameters: MapParameters = MapParameters()
 ) {
     @Transient
     var mapFile: FileHandle? = null
@@ -24,8 +25,10 @@ class GameSetupInfo(
          *          Unciv installation can QuickStart with a different difficulty than New Game defaults to.
          */
         fun fromSettings(defaultDifficulty: String? = null) = UncivGame.Current.settings.run {
-            if (lastGameSetup == null) GameSetupInfo().apply { 
+            if (lastGameSetup == null) GameSetupInfo().apply {
                 if (defaultDifficulty != null) gameParameters.difficulty = defaultDifficulty
+                mapParameters.shape = MapShape.rectangular
+                mapParameters.worldWrap = true
             }
             else GameSetupInfo(lastGameSetup!!).apply {
                 mapParameters.reseed()

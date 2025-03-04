@@ -13,12 +13,6 @@ interface MultiplayerGameUpdateSucceeded : Event, HasMultiplayerGameName {
 }
 
 /**
- * Gets sent when a game was added.
- */
-class MultiplayerGameAdded(
-    override val name: String
-) : Event, HasMultiplayerGameName
-/**
  * Gets sent when a game successfully updated
  */
 class MultiplayerGameUpdated(
@@ -31,7 +25,7 @@ class MultiplayerGameUpdated(
  */
 class MultiplayerGameUpdateFailed(
     override val name: String,
-    val error: Exception
+    val error: Throwable
 ) : MultiplayerGameUpdateEnded
 /**
  * Gets sent when a game updated successfully, but nothing changed
@@ -54,11 +48,4 @@ class MultiplayerGameUpdateStarted(
 class MultiplayerGameNameChanged(
     override val name: String,
     val newName: String
-) : Event, HasMultiplayerGameName
-
-/**
- * Gets sent when a game is deleted
- */
-class MultiplayerGameDeleted(
-    override val name: String
 ) : Event, HasMultiplayerGameName

@@ -1,4 +1,4 @@
-# How to make Unciv use your custom tileset
+# Creating a custom tileset
 
 **You should read the [Mods](Mods.md) page first before proceeding**
 
@@ -25,11 +25,12 @@ BaseTerrain, TerrainFeatures, Resource, Improvement.
 
 This is where tileset configs shine. You can use these to alter the way Unicv renders tiles.
 
-To create a config for your tileset you just need to create a new .json file under Jsons/Tilesets/. Just create a .txt file and rename it to MyCoolTilesetExample.json. You only have to add things if you want to change them. Else the default values will be used.
+To create a config for your tileset you just need to create a new .json file under jsons/Tilesets/. Just create a .txt file and rename it to MyCoolTilesetExample.json. You only have to add things if you want to change them. Else the default values will be used.
 
 This is an example of such a config file that will be explain below:
 
 ```json
+{
     "useColorAsBaseTerrain": "false",
     "useSummaryImages": "true",
     "unexploredTileColor": {"r":1,"g":1,"b":1,"a":1},
@@ -39,11 +40,12 @@ This is an example of such a config file that will be explain below:
     "tileScales": {
         "City center":1.2,
         "Citadel":1.5
-    }
+    },
     "ruleVariants": {
         "Grassland+Forest": ["Grassland","ForestForGrassland"],
         "Grassland+Jungle+Dyes+Trading post": ["Grassland","JungleForGrasslandBack","Dyes+Trading post","JungleForGrasslandFront"]
     }
+}
 ```
 
 ### useColorAsBaseTerrain
@@ -100,6 +102,17 @@ The ruleVariants are the most powerful part of the tileset config. With this, yo
 
 An example is given in the code above. For the tile "Grassland+Jungle+Dyes+Trading post" we then use the images "Grassland", "JungleForGrasslandBack", "Dyes+Trading post" and "JungleForGrasslandFront" in that order.
 
+## Fog and unexplored tiles
+
+Unciv distinguishes between "unexplored" tiles, which are tiles the Civ has never seen,
+and "not visible" tiles, which are those that were seen once but now are not.
+
+Not visible tiles are grayed out by design, and on top of that have the `CrosshatchHexagon.png` image applied to them.
+
+Unexplored tiles display the `UnexploredTile.png` image, on top of which `CrosshatchHexagon.png` is applied.
+
+You can set the CrosshatchHexagon to be functionally invisible by replacing it with a 1px by 1px invisible image.
+
 ## Unit images
 
 Unit images can be changed according to civ-specific styles (if a mod specifies a "style" variable for each civilization) and according to the owning civ's current era. Unciv attempts to load the unit images in the following order (where unitName is the unit name given in Units.json, styleName is optionally specified in Nations.json, and eraName is the era name given in Eras.json (including " era")).
@@ -124,3 +137,36 @@ This is used by providing multiple images per unit, each representing a coloured
 | Archer-2.png | Colour layer | Nation outer colour |
 
 The [Civ Army Color Style Sheet](https://github.com/AdityaMH/Civ-Army-Color-Style-Sheet/tree/main/Images/TileSets/FantasyHex/Units) mod by @AdityaMH and the [5Hex Tileset](https://github.com/ravignir/5Hex-Tileset/tree/master/Images/TileSets/5Hex/Units) by @ravignir are very good practical examples of how this can be used.
+
+## Attack animations
+
+These are small animations that play on units when they receive damage.
+
+They can be for unit types (Archery, Seige, Cavalry) or for specific unit names
+
+The files should be in the format of `<unit type/unit name>-attack-<frame number>`.
+For example, a 3 frame animation for Sword units would have the files `Sword-attack-1.png`, `Sword-attack-3.png`, `Sword-attack-3.png`
+
+## Edge images
+
+You can add additional images that will be drawn only when a tile is adjacent to another tile in a specific direction.
+
+The images should be placed in the `Images/Tilesets/<tileset name>/Edges` folder, rather than in `/Tiles`.
+
+The name of the tile should be `<tile name>-<origin tile filter>-<destination tile filter>-<neighbor direction>.png`, where direction of one of:
+
+- Bottom
+- BottomLeft
+- BottomRight
+- Top
+- TopLeft
+- TopRight
+
+And where the tile filter is one of:
+- Terrain name
+- Feature name
+- Terrain type (Land/Water)
+
+For example: `Cliff-Hills-Coast-Top.png`
+
+The initial name has no bearing on the image used, it is just a way to group images together.

@@ -3,7 +3,7 @@ package com.unciv.models.metadata
 import com.badlogic.gdx.utils.JsonValue
 import java.time.Duration
 
-private const val CURRENT_VERSION = 1
+private const val CURRENT_VERSION = 2
 
 fun GameSettings.doMigrations(json: JsonValue) {
     if (version == null) {

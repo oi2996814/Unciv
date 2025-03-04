@@ -1,18 +1,18 @@
 package com.unciv.logic.multiplayer.storage
 
 import com.unciv.json.json
-import com.unciv.ui.utils.extensions.UncivDateFormat.parseDate
+import com.unciv.ui.components.extensions.UncivDateFormat.parseDate
 import com.unciv.utils.Log
 import com.unciv.utils.debug
 import java.io.BufferedReader
 import java.io.DataOutputStream
-import java.io.FileNotFoundException
 import java.io.InputStream
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.Charset
-import java.util.*
+import java.util.Date
+import java.util.Timer
 import kotlin.concurrent.timer
 
 
@@ -38,8 +38,7 @@ object DropBox: FileStorage {
 
             try {
                 if (data != "") {
-                    // StandardCharsets.UTF_8 requires API 19
-                    val postData: ByteArray = data.toByteArray(Charset.forName("UTF-8"))
+                    val postData: ByteArray = data.toByteArray(Charsets.UTF_8)
                     val outputStream = DataOutputStream(outputStream)
                     outputStream.write(postData)
                     outputStream.flush()
@@ -48,7 +47,7 @@ object DropBox: FileStorage {
                 return inputStream
             } catch (ex: Exception) {
                 debug("Dropbox exception", ex)
-                val reader = BufferedReader(InputStreamReader(errorStream))
+                val reader = BufferedReader(InputStreamReader(errorStream, Charsets.UTF_8))
                 val responseString = reader.readText()
                 debug("Response: %s", responseString)
 
@@ -63,7 +62,7 @@ object DropBox: FileStorage {
                 return null
             } catch (error: Error) {
                 Log.error("Dropbox error", error)
-                debug("Error stream: %s", { BufferedReader(InputStreamReader(errorStream)).readText() })
+                debug("Error stream: %s", { BufferedReader(InputStreamReader(errorStream, Charsets.UTF_8)).readText() })
                 return null
             }
         }
@@ -72,7 +71,7 @@ object DropBox: FileStorage {
     // This is the location in Dropbox only
     private fun getLocalGameLocation(fileName: String) = "/MultiplayerGames/$fileName"
 
-    override fun deleteFile(fileName: String){
+    override fun deleteFile(fileName: String) {
         dropboxApi(
             url="https://api.dropboxapi.com/2/files/delete_v2",
             data="{\"path\":\"${getLocalGameLocation(fileName)}\"}",
@@ -86,23 +85,30 @@ object DropBox: FileStorage {
             data="{\"path\":\"${getLocalGameLocation(fileName)}\"}",
             contentType="application/json"
         )!!
-        val reader = BufferedReader(InputStreamReader(stream))
+        val reader = BufferedReader(InputStreamReader(stream, Charsets.UTF_8))
         return json().fromJson(MetaData::class.java, reader.readText())
     }
 
-    override fun saveFileData(fileName: String, data: String, overwrite: Boolean) {
-        val overwriteModeString = if(!overwrite) "" else ""","mode":{".tag":"overwrite"}"""
+    override fun saveFileData(fileName: String, data: String) {
         dropboxApi(
             url="https://content.dropboxapi.com/2/files/upload",
             data=data,
             contentType="application/octet-stream",
-            dropboxApiArg = """{"path":"${getLocalGameLocation(fileName)}"$overwriteModeString}"""
-        )
+            dropboxApiArg = """{"path":"${getLocalGameLocation(fileName)}","mode":{".tag":"overwrite"}}"""
+        )!!
     }
 
     override fun loadFileData(fileName: String): String {
         val inputStream = downloadFile(getLocalGameLocation(fileName))
-        return BufferedReader(InputStreamReader(inputStream)).readText()
+        return BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8)).readText()
+    }
+
+    override fun authenticate(userId: String, password: String): Boolean {
+        throw NotImplementedError()
+    }
+
+    override fun setPassword(newPassword: String): Boolean {
+        throw NotImplementedError()
     }
 
     fun downloadFile(fileName: String): InputStream {
@@ -128,20 +134,20 @@ object DropBox: FileStorage {
         throw FileStorageRateLimitReached(remainingRateLimitSeconds)
     }
 
-    fun fileExists(fileName: String): Boolean = try {
-            dropboxApi("https://api.dropboxapi.com/2/files/get_metadata",
-                "{\"path\":\"$fileName\"}", "application/json")
-            true
-        } catch (ex: MultiplayerFileNotFoundException) {
-            false
-        }
+//     fun fileExists(fileName: String): Boolean = try {
+//             dropboxApi("https://api.dropboxapi.com/2/files/get_metadata",
+//                 "{\"path\":\"$fileName\"}", "application/json")
+//             true
+//         } catch (ex: MultiplayerFileNotFoundException) {
+//             false
+//         }
 
 //
 //    fun createTemplate(): String {
 //        val result =  dropboxApi("https://api.dropboxapi.com/2/file_properties/templates/add_for_user",
 //                "{\"name\": \"Security\",\"description\": \"These properties describe how confidential this file or folder is.\",\"fields\": [{\"name\": \"Security Policy\",\"description\": \"This is the security policy of the file or folder described.\nPolicies can be Confidential, Public or Internal.\",\"type\": \"string\"}]}"
 //                ,"application/json")
-//        return BufferedReader(InputStreamReader(result)).readText()
+//        return BufferedReader(InputStreamReader(result, Charsets.UTF_8)).readText()
 //    }
 
 //    private class FolderList{
@@ -150,10 +156,10 @@ object DropBox: FileStorage {
 //        var has_more = false
 //    }
 
-    @Suppress("PropertyName")
+    @Suppress("PropertyName")  // and don't make that private or this suppress won't work
     private class MetaData: FileMetaData {
 //        var name = ""
-        private var server_modified = ""
+        var server_modified = ""
 
         override fun getLastModified(): Date {
             return server_modified.parseDate()

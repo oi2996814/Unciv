@@ -1,11 +1,12 @@
 package com.unciv
 
 object Constants {
-    const val worker = "Worker"
     const val settler = "Settler"
     const val eraSpecificUnit = "Era Starting Unit"
-    const val spreadReligion = "Spread Religion"
-    const val removeHeresy = "Remove Foreign religions from your own cities"
+    val all = setOf("All", "all")
+    const val NO_ID = -1
+
+    const val english = "English"
 
     const val impassable = "Impassable"
     const val ocean = "Ocean"
@@ -14,6 +15,9 @@ object Constants {
     const val coast = "Coast"
     /** The "Coastal" terrain _filter_ */
     const val coastal = "Coastal"
+
+    /** Used as filter and the name of the pseudo-TerrainFeature defining river Stats */
+    const val river = "River"
 
     const val mountain = "Mountain"
     const val hill = "Hill"
@@ -37,10 +41,16 @@ object Constants {
     const val freshWaterFilter = "Fresh Water"
 
     const val barbarianEncampment = "Barbarian encampment"
-
+    const val cityCenter = "City center"
+    
+    // Treaties
     const val peaceTreaty = "Peace Treaty"
     const val researchAgreement = "Research Agreement"
+    const val defensivePact = "Defensive Pact"
+    
+    // Agreements
     const val openBorders = "Open Borders"
+    
     /** Used as origin in StatMap or ResourceSupplyList, or the toggle button in DiplomacyOverviewTab */
     const val cityStates = "City-States"
     /** Used as origin in ResourceSupplyList */
@@ -62,29 +72,45 @@ object Constants {
 
     const val cancelImprovementOrder = "Cancel improvement order"
     const val tutorialPopupNamePrefix = "Tutorial: "
+    const val thisUnit = "This Unit"
+    const val targetUnit = "Target Unit"
 
     const val OK = "OK"
     const val close = "Close"
+    const val cancel = "Cancel"
     const val yes = "Yes"
     const val no = "No"
     const val loading = "Loading..."
+    const val working = "Working..."
 
     const val barbarians = "Barbarians"
     const val spectator = "Spectator"
 
-    const val rising = "Rising"
-    const val lowering = "Lowering"
+    const val embarked = "Embarked"
+    const val wounded = "Wounded"
+
     const val remove = "Remove "
+    const val repair = "Repair"
 
     const val uniqueOrDelimiter = "\" OR \""
+    const val stringSplitCharacter = '␟' // U+241 - Unit separator character. Used to join texts and split them with a char that is virtually guaranteed to not be used in normal text. 
+
+
+    const val simulationCiv1 = "SimulationCiv1"
+    const val simulationCiv2 = "SimulationCiv2"
 
     const val dropboxMultiplayerServer = "Dropbox"
+    const val uncivXyzServer = "https://uncivserver.xyz"
 
     const val defaultTileset = "HexaRealm"
+    /** Default for TileSetConfig.fallbackTileSet - Don't change unless you've also moved the crosshatch, borders, and arrows as well */
+    const val defaultFallbackTileset = "FantasyHex"
+    const val defaultUnitset = "AbsoluteUnits"
     const val defaultSkin = "Minimal"
+    const val defaultFallbackSkin = "Minimal"
 
     /**
-     * Use this to determine whether a [MapUnit][com.unciv.logic.map.MapUnit]'s movement is exhausted
+     * Use this to determine whether a [MapUnit][com.unciv.logic.map.mapunit.MapUnit]'s movement is exhausted
      * (currentMovement <= this) if and only if a fuzzy comparison is needed to account for Float rounding errors.
      * _Most_ checks do compare to 0!
      */
@@ -93,4 +119,10 @@ object Constants {
 
     const val defaultFontSize = 18
     const val headingFontSize = 24
+
+    /** URL to the root of the Unciv repository, including trailing slash */
+    // Note: Should the project move, this covers external links, but not comments e.g. mentioning issues
+    const val uncivRepoURL = "https://github.com/yairm210/Unciv/"
+    /** URL to the wiki, including trailing slash */
+    const val wikiURL = "https://yairm210.github.io/Unciv/"
 }
