@@ -1,126 +1,140 @@
 package com.unciv.app.desktop
 
-import club.minnced.discord.rpc.DiscordEventHandlers
-import club.minnced.discord.rpc.DiscordRPC
-import club.minnced.discord.rpc.DiscordRichPresence
-import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration
 import com.badlogic.gdx.files.FileHandle
 import com.badlogic.gdx.graphics.glutils.HdpiMode
-import com.sun.jna.Native
+import com.badlogic.gdx.utils.SharedLibraryLoader
 import com.unciv.UncivGame
-import com.unciv.UncivGameParameters
+import com.unciv.app.desktop.DesktopScreenMode.Companion.getMaximumWindowBounds
 import com.unciv.json.json
-import com.unciv.logic.SETTINGS_FILE_NAME
-import com.unciv.logic.UncivFiles
-import com.unciv.models.metadata.WindowState
-import com.unciv.ui.utils.Fonts
+import com.unciv.logic.files.SETTINGS_FILE_NAME
+import com.unciv.logic.files.UncivFiles
+import com.unciv.models.metadata.GameSettings.ScreenSize
+import com.unciv.models.metadata.GameSettings.WindowState
+import com.unciv.models.ruleset.Ruleset
+import com.unciv.models.ruleset.RulesetCache
+import com.unciv.models.ruleset.validation.RulesetErrorSeverity
+import com.unciv.models.ruleset.validation.RulesetValidator
+import com.unciv.models.ruleset.validation.UniqueAutoUpdater
+import com.unciv.ui.components.fonts.Fonts
+import com.unciv.ui.screens.basescreen.BaseScreen
+import com.unciv.utils.Display
 import com.unciv.utils.Log
-import com.unciv.utils.debug
+import org.lwjgl.system.Configuration
+import java.awt.GraphicsEnvironment
+import java.awt.Image
+import java.awt.Taskbar
 import java.awt.Toolkit
-import java.util.*
-import kotlin.concurrent.timer
+import java.io.File
+import java.net.URL
+import kotlin.system.exitProcess
+
 
 internal object DesktopLauncher {
-    private var discordTimer: Timer? = null
 
     @JvmStatic
     fun main(arg: Array<String>) {
+
+        // The uniques checker requires the file system to be seet up, which happens after lwjgw initializes it
+        if (arg.isNotEmpty() && arg[0] == "mod-ci") {
+            ImagePacker.packImagesPerMod(".", ".")
+            val ruleset = Ruleset()
+            ruleset.folderLocation = FileHandle(".")
+            val jsonsFolder = FileHandle("jsons")
+            if (jsonsFolder.exists()) {
+                // Load vanilla ruleset from the JAR, in case the mod requires parts of it
+                RulesetCache.loadRulesets(consoleMode = true, noMods = true)
+                // Load the actual ruleset here
+                ruleset.load(jsonsFolder)
+            }
+            UniqueAutoUpdater.autoupdateUniques(ruleset)
+            val errors = RulesetValidator(ruleset).getErrorList(true)
+            println(errors.getErrorText(true))
+            exitProcess(if (errors.any { it.errorSeverityToReport == RulesetErrorSeverity.Error }) 1 else 0)
+        }
+        
+        if (arg.isNotEmpty() && arg[0] == "--version") {
+            println(UncivGame.VERSION.text)
+            exitProcess(0)
+        }
+        
+        if (SharedLibraryLoader.isMac) {
+            Configuration.GLFW_LIBRARY_NAME.set("glfw_async")
+            // Since LibGDX 1.13.1 on Mac you cannot call Lwjgl3ApplicationConfiguration.getPrimaryMonitor()
+            //  before GraphicsEnvironment.getLocalGraphicsEnvironment().
+            GraphicsEnvironment.getLocalGraphicsEnvironment()
+        }
+
+        val customDataDirPrefix="--data-dir="
+        val customDataDir = arg.find { it.startsWith(customDataDirPrefix) }?.removePrefix(customDataDirPrefix)
+
+        // Setup Desktop logging
         Log.backend = DesktopLogBackend()
+
+        // Setup Desktop display
+        Display.platform = DesktopDisplay()
+
+        // Setup Desktop font
+        Fonts.fontImplementation = DesktopFont()
+
+        // Setup Desktop saver-loader
+        UncivFiles.saverLoader = if (LinuxX11SaverLoader.isRequired()) LinuxX11SaverLoader() else DesktopSaverLoader()
+        UncivFiles.preferExternalStorage = false
+
         // Solves a rendering problem in specific GPUs and drivers.
         // For more info see https://github.com/yairm210/Unciv/pull/3202 and https://github.com/LWJGL/lwjgl/issues/119
         System.setProperty("org.lwjgl.opengl.Display.allowSoftwareOpenGL", "true")
-        // This setting (default 64) limits clipboard transfers. Value in kB!
-        // 386 is an almost-arbitrary choice from the saves I had at the moment and their GZipped size.
-        // There must be a reason for lwjgl3 being so stingy, which for me meant to stay conservative.
-        System.setProperty("org.lwjgl.system.stackSize", "384")
 
         val isRunFromJAR = DesktopLauncher.javaClass.`package`.specificationVersion != null
         ImagePacker.packImages(isRunFromJAR)
 
         val config = Lwjgl3ApplicationConfiguration()
-        config.setWindowIcon("ExtraImages/Icon.png")
+        config.setWindowIcon("ExtraImages/Icons/Unciv32.png", "ExtraImages/Icons/Unciv128.png")
+        if (SharedLibraryLoader.isMac) updateDockIconForMacOs("ExtraImages/Icons/Unciv128.png")
         config.setTitle("Unciv")
         config.setHdpiMode(HdpiMode.Logical)
-        config.setWindowSizeLimits(120, 80, -1, -1)
+        config.setWindowSizeLimits(WindowState.minimumWidth, WindowState.minimumHeight, -1, -1)
 
-        // We don't need the initial Audio created in Lwjgl3Application, HardenGdxAudio will replace it anyway.
-        // Note that means config.setAudioConfig() would be ignored too, those would need to go into the HardenedGdxAudio constructor.
-        config.disableAudio(true)
+        
+        // LibGDX not yet configured, use regular java class
+        val maximumWindowBounds = getMaximumWindowBounds()
 
-        val settings = UncivFiles.getSettingsForPlatformLaunchers()
+        val settingsDirectory = customDataDir ?: "."
+
+        val settings = UncivFiles.getSettingsForPlatformLaunchers(settingsDirectory)
         if (settings.isFreshlyCreated) {
-            settings.resolution = "1200x800" // By default Desktops should have a higher resolution
-            // LibGDX not yet configured, use regular java class
-            val screensize = Toolkit.getDefaultToolkit().screenSize
-            settings.windowState = WindowState(
-                width = screensize.width,
-                height = screensize.height
-            )
-            FileHandle(SETTINGS_FILE_NAME).writeString(json().toJson(settings), false) // so when we later open the game we get fullscreen
+            settings.screenSize = ScreenSize.Large // By default we guess that Desktops have larger screens
+            settings.windowState = WindowState(maximumWindowBounds)
+
+            FileHandle(settingsDirectory + File.separator + SETTINGS_FILE_NAME).writeString(json().toJson(settings), false, Charsets.UTF_8.name()) // so when we later open the game we get fullscreen
         }
+        // Kludge! This is a workaround - the matching call in DesktopDisplay doesn't "take" quite permanently,
+        // the window might revert to the "config" values when the user moves the window - worse if they
+        // minimize/restore. And the config default is 640x480 unless we set something here.
+        val (width, height) = settings.windowState.coerceIn(maximumWindowBounds)
+        config.setWindowedMode(width, height)
 
-        config.setWindowedMode(settings.windowState.width.coerceAtLeast(120), settings.windowState.height.coerceAtLeast(80))
-
+        config.setInitialBackgroundColor(BaseScreen.clearColor)
 
         if (!isRunFromJAR) {
             UniqueDocsWriter().write()
+            UiElementDocsWriter().write()
         }
 
-        val platformSpecificHelper = PlatformSpecificHelpersDesktop(config)
-        val desktopParameters = UncivGameParameters(
-            cancelDiscordEvent = { discordTimer?.cancel() },
-            fontImplementation = NativeFontDesktop((Fonts.ORIGINAL_FONT_SIZE * settings.fontSizeMultiplier).toInt(), settings.fontFamily),
-            customFileLocationHelper = CustomFileLocationHelperDesktop(),
-            crashReportSysInfo = CrashReportSysInfoDesktop(),
-            platformSpecificHelper = platformSpecificHelper,
-            audioExceptionHelper = HardenGdxAudio()
-        )
 
-        val game = UncivGame(desktopParameters)
 
-        tryActivateDiscord(game)
-        Lwjgl3Application(game, config)
+        // HardenGdxAudio extends Lwjgl3Application, and the Lwjgl3Application constructor runs as long as the game runs
+        HardenGdxAudio(DesktopGame(config, customDataDir), config)
+        exitProcess(0)
     }
 
-    private fun tryActivateDiscord(game: UncivGame) {
+    private fun updateDockIconForMacOs(fileName: String) {
         try {
-            /*
-             We try to load the Discord library manually before the instance initializes.
-             This is because if there's a crash when the instance initializes on a similar line,
-              it's not within the bounds of the try/catch and thus the app will crash.
-             */
-            Native.load("discord-rpc", DiscordRPC::class.java)
-            val handlers = DiscordEventHandlers()
-            DiscordRPC.INSTANCE.Discord_Initialize("647066573147996161", handlers, true, null)
-
-            Runtime.getRuntime().addShutdownHook(Thread { DiscordRPC.INSTANCE.Discord_Shutdown() })
-
-            discordTimer = timer(name = "Discord", daemon = true, period = 1000) {
-                try {
-                    updateRpc(game)
-                } catch (ex: Exception) {
-                    debug("Exception while updating Discord Rich Presence", ex)
-                }
-            }
-        } catch (ex: Throwable) {
-            // This needs to be a Throwable because if we can't find the discord_rpc library, we'll get a UnsatisfiedLinkError, which is NOT an exception.
-            debug("Could not initialize Discord")
-        }
-    }
-
-    private fun updateRpc(game: UncivGame) {
-        if (!game.isInitialized) return
-        val presence = DiscordRichPresence()
-        presence.largeImageKey = "logo" // The actual image is uploaded to the discord app / applications webpage
-
-        val gameInfo = game.gameInfo
-        if (gameInfo != null) {
-            val currentPlayerCiv = gameInfo.getCurrentPlayerCivilization()
-            presence.details = "${currentPlayerCiv.nation.leaderName} of ${currentPlayerCiv.nation.name}"
-            presence.largeImageText = "Turn" + " " + currentPlayerCiv.gameInfo.turns
-        }
-
-        DiscordRPC.INSTANCE.Discord_UpdatePresence(presence)
+            val defaultToolkit: Toolkit = Toolkit.getDefaultToolkit()
+            val imageResource: URL = FileHandle(fileName).file().toURI().toURL()
+            val image: Image = defaultToolkit.getImage(imageResource)
+            val taskbar = Taskbar.getTaskbar()
+            taskbar.iconImage = image
+        } catch (_: Throwable) { }
     }
 }
